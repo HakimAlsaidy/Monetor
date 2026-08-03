@@ -285,6 +285,7 @@
             dc: null,             // RTCDataChannel for control
             mediaStream: null,
             locked: false,
+            pendingCandidates: [], // ICE candidates from parent before the answer is set
         };
 
         const $ = (id) => document.getElementById(id);
@@ -302,10 +303,20 @@
                 if (data.type === 'answer') {
                     if (state.pc) {
                         await state.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }));
+                        // Flush any ICE candidates that arrived before the answer
+                        while (state.pendingCandidates.length) {
+                            const cand = state.pendingCandidates.shift();
+                            try { await state.pc.addIceCandidate(cand); } catch (e) { console.error('addIceCandidate:', e); }
+                        }
                         $('streamStatus').textContent = '🟢 تم الاتصال بولي الأمر';
                     }
                 } else if (data.type === 'candidate') {
-                    if (state.pc) await state.pc.addIceCandidate(data.candidate);
+                    // Buffer until the remote description is set
+                    if (state.pc && state.pc.remoteDescription) {
+                        await state.pc.addIceCandidate(data.candidate);
+                    } else {
+                        state.pendingCandidates.push(data.candidate);
+                    }
                 }
             } catch (e) {
                 console.error('Signal error:', e);

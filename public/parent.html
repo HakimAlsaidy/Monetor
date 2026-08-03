@@ -437,6 +437,7 @@
             gotOffer: false,
             connected: false,
             locked: false,
+            pendingCandidates: [], // ICE candidates that arrived before remote description
         };
 
         // ============================================================
@@ -500,7 +501,13 @@
                 if (data.type === 'offer') {
                     await handleOffer(data.sdp);
                 } else if (data.type === 'candidate') {
-                    if (state.pc) await state.pc.addIceCandidate(data.candidate);
+                    // Buffer ICE candidates until the remote description is set,
+                    // otherwise they get dropped silently and the connection fails.
+                    if (state.pc && state.pc.remoteDescription) {
+                        await state.pc.addIceCandidate(data.candidate);
+                    } else {
+                        state.pendingCandidates.push(data.candidate);
+                    }
                 }
             } catch (e) {
                 console.error('Signal error:', e);
@@ -627,6 +634,12 @@
             const pc = ensurePeerConnection();
             state.gotOffer = true;
             await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
+
+            // Flush any ICE candidates that arrived before the remote description
+            while (state.pendingCandidates.length) {
+                const cand = state.pendingCandidates.shift();
+                try { await pc.addIceCandidate(cand); } catch (e) { console.error('addIceCandidate:', e); }
+            }
 
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
