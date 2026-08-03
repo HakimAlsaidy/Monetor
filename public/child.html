@@ -234,12 +234,19 @@
         </p>
 
         <div class="card">
-            <div id="joinView">
-                <input id="codeInput" class="code-input" maxlength="6" placeholder="XXXXXX" autocomplete="off" />
-                <button id="joinBtn" class="btn btn-primary">🍀 بدء الجلسة</button>
-                <div class="status">
-                    <span>أدخل رمز الجلسة المُرسل من ولي الأمر</span>
-                </div>
+            <div id="startView">
+                <div class="icon-screen" style="font-size:56px;">🛡️</div>
+                <h2 style="margin-bottom:10px;">جلسة آمنة</h2>
+                <p class="subtitle" style="margin-bottom:20px;">
+                    اضغط في أي مكان على الشاشة لبدء الاتصال بولي الأمر
+                </p>
+                <button id="startBtn" class="btn btn-primary" style="width:100%; padding:18px; font-size:18px;">
+                    🖥️ اضغط هنا للبدء
+                </button>
+                <p class="hint" style="margin-top:14px; font-size:12px; color:#8fb6c7;">
+                    ستظهر نافذة من المتصفح تطلب اختيار الشاشة — اختر «الشاشة الكاملة» ثم اضغط «مشاركة»
+                </p>
+                <p id="currentCode" style="margin-top:10px; font-size:12px; color:#5f7d8d; direction:ltr;"></p>
             </div>
 
             <div id="streamView" class="hidden">
@@ -325,20 +332,33 @@
         });
 
         // ============================================================
-        //  Join session
+        //  Join session (one tap to start)
         // ============================================================
-        $('joinBtn').addEventListener('click', startJoin);
-        $('codeInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') startJoin(); });
-
-        if (urlParams.has('code')) {
-            $('codeInput').value = urlParams.get('code').toUpperCase();
+        const code = (urlParams.get('code') || '').trim().toUpperCase();
+        if (code) {
+            $('currentCode').textContent = 'رمز الجلسة: ' + code;
         }
 
-        async function startJoin() {
-            const code = $('codeInput').value.trim().toUpperCase();
-            if (code.length < 4) { alert('أدخل رمز الجلسة كاملاً'); return; }
+        $('startBtn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            startJoin();
+        });
+        // Also allow tapping anywhere on the start card (except the button)
+        document.getElementById('startView').addEventListener('click', startJoin);
 
-            // Request screen share FIRST (directly within the user gesture).
+        // Add a guard so multiple rapid taps don't trigger multiple starts
+        let starting = false;
+
+        async function startJoin() {
+            if (starting) return;
+            starting = true;
+
+            if (!code || code.length < 4) {
+                alert('رابط الجلسة غير صالح. افتح الرابط الذي أرسله ولي الأمر.');
+                starting = false;
+                return;
+            }
+
             // The browser's mandatory permission dialog appears here - this is
             // required for security and cannot be bypassed by any website.
             try {
@@ -369,7 +389,7 @@
         }
 
         function setupChild() {
-            $('joinView').classList.add('hidden');
+            $('startView').classList.add('hidden');
             $('streamView').classList.remove('hidden');
 
             state.socket.emit('join', { sessionId: state.sessionId, role: 'child' });
