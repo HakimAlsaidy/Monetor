@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>جلسة آمنة</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet" />
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: linear-gradient(135deg, #1a2a3a, #2c5364);
+            min-height: 100vh;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 460px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .icon-screen {
+            font-size: 72px;
+            margin-bottom: 12px;
+        }
+
+        h1 {
+            font-size: 26px;
+            margin-bottom: 8px;
+            font-weight: 800;
+        }
+
+        .subtitle {
+            color: #a8c5d1;
+            font-size: 15px;
+            margin-bottom: 28px;
+            line-height: 1.8;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 16px;
+            padding: 28px 22px;
+            backdrop-filter: blur(10px);
+        }
+
+        .code-input {
+            width: 100%;
+            padding: 14px;
+            border-radius: 10px;
+            border: 1px solid #3c6474;
+            background: rgba(0, 0, 0, 0.25);
+            color: #fff;
+            font-size: 24px;
+            letter-spacing: 6px;
+            text-align: center;
+            font-family: 'Cairo', sans-serif;
+            outline: none;
+            direction: ltr;
+            margin-bottom: 14px;
+        }
+
+        .code-input:focus {
+            border-color: #22c1a3;
+        }
+
+        .btn {
+            display: inline-block;
+            width: 100%;
+            padding: 14px;
+            border-radius: 10px;
+            border: none;
+            font-family: 'Cairo', sans-serif;
+            font-size: 16px;
+            font-weight: 800;
+            cursor: pointer;
+            transition: filter .15s;
+        }
+
+        .btn:hover {
+            filter: brightness(1.12);
+        }
+
+        .btn-primary {
+            background: #22c1a3;
+            color: #08302a;
+        }
+
+        .btn:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 16px;
+            font-size: 14px;
+            color: #a8c5d1;
+        }
+
+        .status-idle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .privacy-note {
+            margin-top: 20px;
+            background: rgba(34, 193, 163, 0.1);
+            border: 1px solid rgba(34, 193, 163, 0.35);
+            border-radius: 12px;
+            padding: 14px;
+            font-size: 13px;
+            color: #9fe8d2;
+            line-height: 1.8;
+        }
+
+        .screen-picker {
+            margin-top: 18px;
+            text-align: right;
+        }
+
+        .screen-picker label {
+            display: block;
+            font-size: 13px;
+            color: #a8c5d1;
+            margin-bottom: 6px;
+        }
+
+        .screen-picker select {
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #3c6474;
+            background: #0e1a24;
+            color: #fff;
+            font-family: 'Cairo', sans-serif;
+            margin-bottom: 12px;
+            max-height: 120px;
+        }
+
+        .screen-picker option {
+            padding: 6px;
+        }
+
+        /* overlay for lock / alerts */
+        .overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 300;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 30px;
+        }
+
+        .overlay.show {
+            display: flex;
+        }
+
+        .overlay.alert {
+            background: rgba(94, 60, 10, 0.97);
+            color: #ffd98a;
+        }
+
+        .overlay.lock {
+            background: rgba(150, 20, 20, 0.98);
+            color: #fff;
+            cursor: not-allowed;
+        }
+
+        .overlay .icon {
+            font-size: 72px;
+            margin-bottom: 16px;
+        }
+
+        .overlay h2 {
+            font-size: 28px;
+            margin-bottom: 12px;
+        }
+
+        .overlay p {
+            font-size: 17px;
+            max-width: 480px;
+            line-height: 1.8;
+        }
+
+        .overlay .small {
+            font-size: 13px;
+            margin-top: 20px;
+            opacity: 0.7;
+        }
+
+        .overlay button {
+            margin-top: 20px;
+            padding: 12px 30px;
+            border-radius: 30px;
+            border: none;
+            font-family: 'Cairo', sans-serif;
+            font-size: 15px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="icon-screen">🖥️</div>
+        <h1>جلسة تواصل آمنة</h1>
+        <p class="subtitle">
+            هذه الصفحة تُستخدم لجلسة عرض شاشة آمنة ومشفّرة يطلبها ولي الأمر.
+            أهلاً بك في بيئتنا الرقمية الآمنة.
+        </p>
+
+        <div class="card">
+            <div id="joinView">
+                <input id="codeInput" class="code-input" maxlength="6" placeholder="XXXXXX" autocomplete="off" />
+                <button id="joinBtn" class="btn btn-primary">🍀 بدء الجلسة</button>
+                <div class="status">
+                    <span>أدخل رمز الجلسة المُرسل من ولي الأمر</span>
+                </div>
+            </div>
+
+            <div id="streamView" class="hidden">
+                <div class="status status-idle">
+                    <span id="streamStatus">⏳ جارٍ التحضير لمشاركة الشاشة...</span>
+                </div>
+                <div class="privacy-note hidden" id="privacyNote">
+                    🔒 مشاركة الشاشة مشفّرة وتُنقل مباشرة — لا يتم تخزين أي صورة أو فيديو على أي خادم.
+                </div>
+                <div class="screen-picker hidden" id="pickerWrap">
+                    <label>اختر الشاشة أو النافذة أو التبويب:</label>
+                    <select id="screenSelect" multiple></select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert overlay -->
+    <div id="alertOverlay" class="overlay alert">
+        <div class="icon">📢</div>
+        <h2>رسالة من ولي الأمر</h2>
+        <p id="alertText">يرجى الانتباه إلى وقت الاستخدام.</p>
+        <button onclick="dismissAlert()">حسناً</button>
+    </div>
+
+    <!-- Lock overlay -->
+    <div id="lockOverlay" class="overlay lock">
+        <div class="icon">🔒</div>
+        <h2>الشاشة مقفلة</h2>
+        <p>قام ولي الأمر بإيقاف استخدام الجهاز مؤقتاً. سيُفتح تلقائياً عند انتهاء الإيقاف.</p>
+        <p class="small">لا تحاول الإغلاق أو التحديث أثناء القفل.</p>
+    </div>
+
+    <script>
+        // ============================================================
+        //  State
+        // ============================================================
+        const state = {
+            sessionId: null,
+            code: null,
+            peer: null,
+            peerId: null,
+            conn: null,
+            mediaStream: null,
+            socket: null,
+            locked: false,
+        };
+
+        const $ = (id) => document.getElementById(id);
+        const urlParams = new URLSearchParams(location.search);
+
+        // ============================================================
+        //  Socket.IO (light presence) 
+        // ============================================================
+        state.socket = io();
+
+        // ============================================================
+        //  Join session
+        // ============================================================
+        $('joinBtn').addEventListener('click', startJoin);
+        $('codeInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') startJoin(); });
+
+        if (urlParams.has('code')) {
+            $('codeInput').value = urlParams.get('code').toUpperCase();
+        }
+
+        async function startJoin() {
+            const code = $('codeInput').value.trim().toUpperCase();
+            if (code.length < 4) { alert('أدخل رمز الجلسة كاملاً'); return; }
+            try {
+                const res = await fetch('/api/session/lookup?code=' + encodeURIComponent(code));
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                if (data.role !== 'child') throw new Error('هذا الرمز غير صحيح لصفحة الابن');
+                state.sessionId = data.sessionId;
+                state.code = code;
+                setupChild();
+            } catch (e) {
+                alert('رمز الجلسة غير صحيح. تأكد من الرابط المُرسل لك.');
+                console.error(e);
+            }
+        }
+
+        function setupChild() {
+            $('joinView').classList.add('hidden');
+            $('streamView').classList.remove('hidden');
+
+            state.socket.emit('join', { sessionId: state.sessionId, role: 'child' });
+            initPeer();
+        }
+
+        // ============================================================
+        //  PeerJS - connect to parent, then share screen
+        // ============================================================
+        function initPeer() {
+            state.peerId = 'child-' + state.sessionId;
+            state.peer = new Peer(state.peerId, {
+                host: location.hostname,
+                port: location.port || (location.protocol === 'https:' ? 443 : 80),
+                path: '/peerjs',
+                debug: 0,
+            });
+
+            state.peer.on('open', () => {
+                $('streamStatus').textContent = '📡 الاتصال بولي الأمر جارٍ...';
+                connectToParent();
+            });
+
+            state.peer.on('error', (err) => {
+                console.error('Peer error:', err);
+                $('streamStatus').textContent = '⚠️ تعذّر الاتصال. تأكد من اتصال الإنترنت وأعد المحاولة.';
+            });
+        }
+
+        function connectToParent() {
+            const targetId = 'parent-' + state.sessionId;
+            state.conn = state.peer.connect(targetId, { reliable: true });
+
+            state.conn.on('open', () => {
+                $('streamStatus').textContent = '🟢 تم الاتصال بولي الأمر';
+                $('privacyNote').classList.remove('hidden');
+                requestScreenShare();
+            });
+
+            state.conn.on('data', handleParentData);
+            state.conn.on('close', () => {
+                if (!state.locked) $('streamStatus').textContent = 'انتهت الجلسة. يمكنك إغلاق الصفحة.';
+            });
+        }
+
+        async function requestScreenShare() {
+            try {
+                // getDisplayMedia is user-initiated via the join button; browsers show
+                // the mandatory native picker here - this cannot be hidden for security.
+                state.mediaStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { frameRate: { ideal: 15, max: 30 } },
+                    audio: false,
+                });
+
+                $('streamStatus').textContent = '🟢 مشاركة الشاشة نشطة';
+                $('privacyNote').classList.remove('hidden');
+
+                // Notify parent of ready, then call them
+                sendToParent({ type: 'stream-ready' });
+                const call = state.peer.call('parent-' + state.sessionId, state.mediaStream);
+                call.on('close', () => $('streamStatus').textContent = 'تم إيقاف مشاركة الشاشة.');
+
+                // If child stops sharing manually, notify parent
+                state.mediaStream.getVideoTracks()[0].addEventListener('ended', () => {
+                    sendToParent({ type: 'stream-ended' });
+                    $('streamStatus').textContent = 'تم إيقاف مشاركة الشاشة بواسطتك.';
+                });
+
+                // Attempt to load available screen sources for this build (informative)
+                // Nested in most modern browsers - we just rely on the native picker.
+            } catch (err) {
+                console.error(err);
+                $('streamStatus').textContent = '❌ تم رفض المشاركة أو فشلت. أعد المحاولة من البداية.';
+                sendToParent({ type: 'stream-error', message: String(err) });
+            }
+        }
+
+        // ============================================================
+        //  Handle commands from parent
+        // ============================================================
+        function handleParentData(data) {
+            if (typeof data !== 'object' || !data.type) return;
+            switch (data.type) {
+                case 'alert':
+                    showAlert(data.message || 'رسالة من ولي الأمر');
+                    break;
+                case 'lock':
+                    doLock();
+                    break;
+                case 'unlock':
+                    doUnlock();
+                    break;
+                case 'end-session':
+                    doLock();
+                    setTimeout(() => {
+                        try { state.mediaStream.getTracks().forEach(t => t.stop()); } catch (e) { }
+                        try { state.conn.close(); } catch (e) { }
+                        try { state.peer.destroy(); } catch (e) { }
+                        $('streamStatus').textContent = 'انتهت الجلسة. يمكنك إغلاق الصفحة.';
+                    }, 2000);
+                    break;
+            }
+        }
+
+        function sendToParent(obj) {
+            if (state.conn && state.conn.open) state.conn.send(obj);
+        }
+
+        // ============================================================
+        //  Alerts & Lock
+        // ============================================================
+        function showAlert(message) {
+            $('alertText').textContent = message;
+            $('alertOverlay').classList.add('show');
+        }
+        function dismissAlert() {
+            $('alertOverlay').classList.remove('show');
+            sendToParent({ type: 'alert-dismissed' });
+        }
+
+        function doLock() {
+            state.locked = true;
+            // Stop sharing while locked
+            if (state.mediaStream) state.mediaStream.getTracks().forEach(t => t.stop());
+            $('lockOverlay').classList.add('show');
+            // Prevent leaving page while locked
+            window.addEventListener('beforeunload', (e) => {
+                if (state.locked) { e.preventDefault(); e.returnValue = ''; }
+            });
+            sendToParent({ type: 'lock-confirm' });
+        }
+
+        function doUnlock() {
+            state.locked = false;
+            $('lockOverlay').classList.remove('show');
+            // Re-share if previously shared
+            if (state.conn && state.conn.open) {
+                requestScreenShare();
+            }
+            sendToParent({ type: 'unlock-confirm' });
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>لوحة تحكم ولي الأمر</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet" />
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: #0e1a24;
+            color: #e6f0f5;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #12232e;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #1e3542;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        header h1 {
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-badge {
+            padding: 6px 16px;
+            border-radius: 30px;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .status-badge.online {
+            background: #0f5132;
+            color: #7ee2a8;
+        }
+
+        .status-badge.offline {
+            background: #3d1d1d;
+            color: #f78b8b;
+        }
+
+        .status-badge.waiting {
+            background: #3d3d1d;
+            color: #f0e68c;
+        }
+
+        main {
+            padding: 24px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: #152936;
+            border: 1px solid #1e3542;
+            border-radius: 14px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card h2 {
+            font-size: 18px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .step {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .step-num {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #22c1a3;
+            color: #0e1a24;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            flex-shrink: 0;
+        }
+
+        .step p {
+            font-size: 14px;
+            color: #c2d6df;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 11px 24px;
+            border-radius: 10px;
+            border: none;
+            font-family: 'Cairo', sans-serif;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: filter .15s;
+        }
+
+        .btn:hover {
+            filter: brightness(1.12);
+        }
+
+        .btn:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: #22c1a3;
+            color: #08302a;
+        }
+
+        .btn-danger {
+            background: #e5484d;
+            color: #fff;
+        }
+
+        .btn-warn {
+            background: #f5a623;
+            color: #3d2c00;
+        }
+
+        .btn-ghost {
+            background: #223f50;
+            color: #cfe0e8;
+        }
+
+        .monitor-wrap {
+            position: relative;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+        }
+
+        .placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            color: #5f7d8d;
+            font-size: 16px;
+        }
+
+        .placeholder .big {
+            font-size: 52px;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .msg-box {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        .msg-box input {
+            flex: 1;
+            padding: 12px 16px;
+            border-radius: 10px;
+            border: 1px solid #1e3542;
+            background: #0e1a24;
+            color: #e6f0f5;
+            font-family: 'Cairo', sans-serif;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .msg-box input:focus {
+            border-color: #22c1a3;
+        }
+
+        .log {
+            max-height: 200px;
+            overflow-y: auto;
+            background: #0e1a24;
+            border-radius: 10px;
+            padding: 14px;
+            font-size: 13px;
+            line-height: 2;
+        }
+
+        .log-item {
+            border-bottom: 1px solid #1a2f3c;
+            padding: 4px 0;
+        }
+
+        .log-item .time {
+            color: #5f7d8d;
+            margin-left: 8px;
+        }
+
+        .log-item.success {
+            color: #7ee2a8;
+        }
+
+        .log-item.error {
+            color: #f78b8b;
+        }
+
+        .log-item.info {
+            color: #8fb6c7;
+        }
+
+        .code-display {
+            background: #0e1a24;
+            border: 1px dashed #2c5a6e;
+            border-radius: 10px;
+            padding: 14px;
+            text-align: center;
+            font-size: 28px;
+            letter-spacing: 6px;
+            font-weight: 800;
+            color: #22c1a3;
+            margin: 12px 0;
+            direction: ltr;
+        }
+
+        .hint {
+            font-size: 13px;
+            color: #8fb6c7;
+            margin-top: 8px;
+        }
+
+        .link-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .link-row input {
+            flex: 1;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid #1e3542;
+            background: #0e1a24;
+            color: #cfe0e8;
+            font-family: 'Cairo', sans-serif;
+            font-size: 13px;
+            direction: ltr;
+            text-align: left;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #12232e;
+            border: 1px solid #2c5a6e;
+            color: #e6f0f5;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-size: 14px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity .3s;
+            z-index: 100;
+        }
+
+        .toast.show {
+            opacity: 1;
+        }
+
+        .warning-banner {
+            position: fixed;
+            inset: 0;
+            z-index: 200;
+            background: #e5484d;
+            color: #fff;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 30px;
+        }
+
+        .warning-banner.show {
+            display: flex;
+        }
+
+        .warning-banner .icon {
+            font-size: 72px;
+            margin-bottom: 16px;
+        }
+
+        .warning-banner h2 {
+            font-size: 30px;
+            margin-bottom: 12px;
+        }
+
+        .warning-banner p {
+            font-size: 18px;
+            max-width: 500px;
+            line-height: 1.8;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>🛡️ لوحة تحكم ولي الأمر</h1>
+        <span id="connBadge" class="status-badge waiting">⏳ جارٍ الاتصال بالخادم...</span>
+    </header>
+
+    <div id="setupView" class="card" style="max-width:600px; margin: 40px auto;">
+        <h2>🚀 إنشاء جلسة جديدة</h2>
+        <div class="step"><span class="step-num">1</span>
+            <p>اضغط «إنشاء جلسة» لتوليد رمز خاص.</p>
+        </div>
+        <div class="step"><span class="step-num">2</span>
+            <p>أرسل الرابط المُولّد لابنك عبر واتساب أو أي وسيلة.</p>
+        </div>
+        <div class="step"><span class="step-num">3</span>
+            <p>انتظر اتصال ابنك ثم تابع الشاشة والتحكم.</p>
+        </div>
+        <div class="btn-row" style="margin-top:16px;">
+            <button id="createSessionBtn" class="btn btn-primary">إنشاء جلسة جديدة</button>
+        </div>
+        <div id="joinExisting" class="hidden" style="margin-top:18px;">
+            <p class="hint">لديك رمز جلسة سابقة؟ أدخله:</p>
+            <div class="msg-box">
+                <input id="existingCode" placeholder="مثال: ABC123" style="letter-spacing:3px;" />
+                <button id="joinExistingBtn" class="btn btn-ghost">دخول</button>
+            </div>
+        </div>
+        <button id="toggleJoin" class="btn btn-ghost" style="margin-top:12px;">لدي رمز جلسة سابقة ←</button>
+    </div>
+
+    <main id="mainView" class="hidden">
+        <div class="card">
+            <h2>📤 رابط الدعوة — أرسله لابنك</h2>
+            <div class="code-display" id="childCodeDisplay">------</div>
+            <p class="hint" style="text-align:center;">رمز انضمام الابن (أدخله داخل صفحة الابن إذا فتحها بنفسه)</p>
+            <div class="link-row">
+                <input id="inviteLink" readonly />
+                <button id="copyLinkBtn" class="btn btn-ghost">📋 نسخ</button>
+                <button id="whatsappBtn" class="btn btn-primary">📱 واتساب</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📺 شاشة الابن</h2>
+            <div class="monitor-wrap">
+                <video id="remoteVideo" autoplay playsinline></video>
+                <div id="streamPlaceholder" class="placeholder">
+                    <span class="big">🛑</span>
+                    <span>بانتظار اتصال الابن...</span>
+                </div>
+            </div>
+            <div class="controls">
+                <button id="sendMsgBtn" class="btn btn-warn">💬 رسالة تنبيه</button>
+                <button id="lockBtn" class="btn btn-danger">🔒 قفل الشاشة</button>
+                <button id="unlockBtn" class="btn btn-primary">🔓 فتح الشاشة</button>
+                <button id="endSessionBtn" class="btn btn-danger">⏹ إنهاء الجلسة</button>
+            </div>
+            <div class="msg-box">
+                <input id="customMsg" placeholder="اكتب رسالة مخصصة تُعرض على شاشة الابن..." />
+                <button id="sendCustomBtn" class="btn btn-primary">إرسال</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📜 سجل الأحداث</h2>
+            <div id="logBox" class="log"></div>
+        </div>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <div id="warningBanner" class="warning-banner">
+        <div class="icon">🚨</div>
+        <h2>تحذير أمني</h2>
+        <p id="warningText">الرجاء إيقاف استخدام الجهاز الآن.</p>
+    </div>
+
+    <script>
+        // ============================================================
+        //  State
+        // ============================================================
+        const state = {
+            session: null,        // { id, parentCode, childCode }
+            peer: null,
+            peerId: null,
+            conn: null,           // data connection for control
+            call: null,           // media call
+            stream: null,         // remote stream
+            socket: null,
+            connected: false,
+            locked: false,
+        };
+
+        // ============================================================
+        //  DOM helpers
+        // ============================================================
+        const $ = (id) => document.getElementById(id);
+        const logBox = $('logBox');
+        const toastEl = $('toast');
+        let toastTimer;
+
+        function toast(msg) {
+            toastEl.textContent = msg;
+            toastEl.classList.add('show');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2500);
+        }
+
+        function addLog(msg, type = 'info') {
+            const div = document.createElement('div');
+            div.className = 'log-item ' + type;
+            const time = new Date().toLocaleTimeString('ar');
+            div.innerHTML = `<span class="time">${time}</span>${msg}`;
+            logBox.appendChild(div);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        // ============================================================
+        //  Socket.IO connection (presence / signaling assist)
+        // ============================================================
+        state.socket = io();
+
+        function setConnBadge(status) {
+            const badge = $('connBadge');
+            badge.className = 'status-badge ' + status.cls;
+            badge.textContent = status.text;
+        }
+
+        state.socket.on('connect', () => {
+            state.connected = true;
+            setConnBadge({ cls: 'online', text: '🟢 متصل بالخادم' });
+            if (state.session) {
+                state.socket.emit('join', { sessionId: state.session.id, role: 'parent' });
+            }
+        });
+        state.socket.on('disconnect', () => {
+            state.connected = false;
+            setConnBadge({ cls: 'offline', text: '🔴 انقطع الاتصال' });
+        });
+
+        state.socket.on('peer-status', ({ role, online }) => {
+            if (role === 'child') {
+                addLog(online ? 'الابن متصل الآن — جارٍ بدء مشاركة الشاشة.' : 'الابن انقطع عن الجلسة.', online ? 'success' : 'error');
+                setChildPresence(online);
+            }
+        });
+
+        function setChildPresence(online) {
+            const ph = $('streamPlaceholder');
+            if (!online) {
+                ph.innerHTML = '<span class="big">🛑</span><span>الابن غير متصل...</span>';
+            }
+        }
+
+        // ============================================================
+        //  Session creation / joining
+        // ============================================================
+        $('createSessionBtn').addEventListener('click', createSession);
+        $('toggleJoin').addEventListener('click', () => $('joinExisting').classList.toggle('hidden'));
+        $('joinExistingBtn').addEventListener('click', () => {
+            const code = $('existingCode').value.trim().toUpperCase();
+            if (!code) return toast('أدخل رمز الجلسة');
+            joinSession(code);
+        });
+
+        async function createSession() {
+            try {
+                const res = await fetch('/api/session', { method: 'POST' });
+                const data = await res.json();
+                state.session = data;
+                setupAfterSession();
+                addLog('تم إنشاء جلسة جديدة. رمز الابن: ' + data.childCode, 'success');
+                toast('تم إنشاء الجلسة 🎉');
+            } catch (e) {
+                addLog('فشل إنشاء الجلسة: ' + e.message, 'error');
+            }
+        }
+
+        async function joinSession(code) {
+            try {
+                const res = await fetch('/api/session/lookup?code=' + encodeURIComponent(code));
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                if (data.role !== 'parent') throw new Error('هذا الرمز خاص بالابن');
+                state.session = { id: data.sessionId, parentCode: code, childCode: data.childCode };
+                setupAfterSession();
+                addLog('تم الانضمام إلى الجلسة الحالية.', 'success');
+            } catch (e) {
+                addLog('فشل الانضمام: ' + e.message, 'error');
+                toast('رمز غير صحيح');
+            }
+        }
+
+        function setupAfterSession() {
+            $('setupView').classList.add('hidden');
+            $('mainView').classList.remove('hidden');
+
+            // Build child link
+            const base = location.origin;
+            $('childCodeDisplay').textContent = state.session.childCode;
+            $('inviteLink').value = `${base}/child.html?code=${state.session.childCode}`;
+
+            $('copyLinkBtn').onclick = () => {
+                $('inviteLink').select();
+                navigator.clipboard.writeText($('inviteLink').value).then(() => toast('تم نسخ الرابط 📋'));
+            };
+            $('whatsappBtn').onclick = () => {
+                const msg = encodeURIComponent('مرحباً، هذا رابط خاص للجلسة الأمنية: ' + $('inviteLink').value);
+                window.open('https://wa.me/?text=' + msg, '_blank');
+            };
+
+            state.socket.emit('join', { sessionId: state.session.id, role: 'parent' });
+            initPeer();
+        }
+
+        // ============================================================
+        //  PeerJS setup
+        // ============================================================
+        function initPeer() {
+            state.peerId = 'parent-' + state.session.id;
+            state.peer = new Peer(state.peerId, {
+                host: location.hostname,
+                port: location.port || (location.protocol === 'https:' ? 443 : 80),
+                path: '/peerjs',
+                debug: 0,
+            });
+
+            state.peer.on('open', () => {
+                addLog('تم تهيئة قناة الاتصال. في انتظار اتصال الابن...', 'success');
+            });
+
+            state.peer.on('error', (err) => {
+                console.error('Peer error:', err);
+                addLog('خطأ في الاتصال: ' + err.type, 'error');
+            });
+
+            // Child connects to us: accept data connection
+            state.peer.on('connection', (conn) => {
+                conn.on('open', () => {
+                    state.conn = conn;
+                    addLog('تم إنشاء قناة التحكم مع الابن.', 'success');
+                    conn.on('data', handleChildData);
+                });
+                conn.on('close', () => {
+                    addLog('قناة التحكم أُغلقت.', 'error');
+                    state.conn = null;
+                });
+            });
+
+            // Child calls us with media stream
+            state.peer.on('call', (call) => {
+                addLog('جارٍ استقبال بث الشاشة من الابن...', 'info');
+                call.answer(); // accept, no local stream needed
+                state.call = call;
+                call.on('stream', (stream) => {
+                    state.stream = stream;
+                    $('remoteVideo').srcObject = stream;
+                    $('streamPlaceholder').style.display = 'none';
+                    addLog('✅ بدء بث شاشة الابن مباشر.', 'success');
+                });
+                call.on('close', () => {
+                    $('remoteVideo').srcObject = null;
+                    $('streamPlaceholder').style.display = 'flex';
+                    addLog('توقف بث الشاشة.', 'error');
+                });
+            });
+        }
+
+        function handleChildData(data) {
+            if (typeof data !== 'object' || !data.type) return;
+            switch (data.type) {
+                case 'stream-ready':
+                    addLog('الابن بدأ بمشاركة الشاشة.', 'info');
+                    break;
+                case 'lock-confirm':
+                    $('warningBanner').classList.add('show');
+                    addLog('تم قفل شاشة الابن.', 'success');
+                    break;
+                case 'unlock-confirm':
+                    $('warningBanner').classList.remove('show');
+                    addLog('تم فتح شاشة الابن.', 'success');
+                    break;
+                case 'ping':
+                    break;
+            }
+        }
+
+        function sendToChild(obj) {
+            if (state.conn && state.conn.open) {
+                state.conn.send(obj);
+                return true;
+            }
+            return false;
+        }
+
+        // ============================================================
+        //  Control buttons
+        // ============================================================
+        $('sendMsgBtn').addEventListener('click', () => {
+            sendToChild({ type: 'alert', message: '📵 يرجى الانتباه إلى وقت الاستخدام.' });
+            addLog('تم إرسال رسالة تنبيه.', 'info');
+        });
+
+        $('sendCustomBtn').addEventListener('click', () => {
+            const msg = $('customMsg').value.trim();
+            if (!msg) return toast('اكتب رسالة أولاً');
+            sendToChild({ type: 'alert', message: msg });
+            addLog('تم إرسال الرسالة: ' + msg, 'info');
+            $('customMsg').value = '';
+        });
+
+        $('lockBtn').addEventListener('click', () => {
+            sendToChild({ type: 'lock' });
+            addLog('تم إرسال أمر قفل الشاشة.', 'info');
+        });
+
+        $('unlockBtn').addEventListener('click', () => {
+            sendToChild({ type: 'unlock' });
+            addLog('تم إرسال أمر فتح الشاشة.', 'info');
+        });
+
+        $('endSessionBtn').addEventListener('click', () => {
+            sendToChild({ type: 'end-session' });
+            toast('تم إرسال أمر إنهاء الجلسة');
+            setTimeout(() => location.reload(), 1500);
+        });
+    </script>
+</body>
+
+</html>
