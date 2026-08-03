@@ -2,20 +2,13 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
-const { ExpressPeerServer } = require('peer');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
-
-// ============================================================
-//  PeerJS (WebRTC signaling) on the same server
-// ============================================================
-const peerServer = ExpressPeerServer(server, {
-    path: '/peerjs',
-    allow_discovery: false,
+const io = new Server(server, {
+    // Allow connections from the same origin and any host in production
+    cors: { origin: '*', methods: ['GET', 'POST'] },
 });
-app.use('/peerjs', peerServer);
 
 // ============================================================
 //  Static files
@@ -99,6 +92,20 @@ io.on('connection', (socket) => {
             role: socket.data.role,
             online: true,
             ...payload,
+        });
+    });
+
+    // ------------------------------------------------------------
+    //  WebRTC signaling relay (handles P2P setup across networks,
+    //  works behind Render's proxies - connection is direct between
+    //  browsers, this server only forwards the setup messages)
+    // ------------------------------------------------------------
+    socket.on('signal', (payload) => {
+        if (!socket.data.sessionId) return;
+        // Forward to everyone else in the session room
+        socket.to(socket.data.sessionId).emit('signal', {
+            ...payload,
+            from: socket.data.role,
         });
     });
 

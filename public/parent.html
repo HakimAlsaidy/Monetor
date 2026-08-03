@@ -7,7 +7,6 @@
     <title>لوحة تحكم ولي الأمر</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet" />
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         * {
@@ -432,12 +431,10 @@
         // ============================================================
         const state = {
             session: null,        // { id, parentCode, childCode }
-            peer: null,
-            peerId: null,
-            conn: null,           // data connection for control
-            call: null,           // media call
-            stream: null,         // remote stream
             socket: null,
+            pc: null,             // RTCPeerConnection
+            dc: null,             // RTCDataChannel for control
+            gotOffer: false,
             connected: false,
             locked: false,
         };
@@ -467,7 +464,7 @@
         }
 
         // ============================================================
-        //  Socket.IO connection (presence / signaling assist)
+        //  Socket.IO connection (presence + WebRTC signaling)
         // ============================================================
         state.socket = io();
 
@@ -493,6 +490,21 @@
             if (role === 'child') {
                 addLog(online ? 'الابن متصل الآن — جارٍ بدء مشاركة الشاشة.' : 'الابن انقطع عن الجلسة.', online ? 'success' : 'error');
                 setChildPresence(online);
+            }
+        });
+
+        // Receive WebRTC signaling from child
+        state.socket.on('signal', async (data) => {
+            if (data.from !== 'child') return;
+            try {
+                if (data.type === 'offer') {
+                    await handleOffer(data.sdp);
+                } else if (data.type === 'candidate') {
+                    if (state.pc) await state.pc.addIceCandidate(data.candidate);
+                }
+            } catch (e) {
+                console.error('Signal error:', e);
+                addLog('خطأ في معالجة الإشارة: ' + e.message, 'error');
             }
         });
 
@@ -561,60 +573,65 @@
             };
 
             state.socket.emit('join', { sessionId: state.session.id, role: 'parent' });
-            initPeer();
+            addLog('في انتظار اتصال الابن...', 'info');
         }
 
         // ============================================================
-        //  PeerJS setup
+        //  WebRTC setup (parent receives offer from child)
         // ============================================================
-        function initPeer() {
-            state.peerId = 'parent-' + state.session.id;
-            state.peer = new Peer(state.peerId, {
-                host: location.hostname,
-                port: location.port || (location.protocol === 'https:' ? 443 : 80),
-                path: '/peerjs',
-                debug: 0,
+        function ensurePeerConnection() {
+            if (state.pc) return state.pc;
+            state.pc = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                ],
             });
 
-            state.peer.on('open', () => {
-                addLog('تم تهيئة قناة الاتصال. في انتظار اتصال الابن...', 'success');
-            });
+            // ICE candidates -> send to child via signaling
+            state.pc.onicecandidate = (e) => {
+                if (e.candidate) {
+                    state.socket.emit('signal', {
+                        type: 'candidate',
+                        candidate: e.candidate,
+                        sdp: null,
+                    });
+                }
+            };
 
-            state.peer.on('error', (err) => {
-                console.error('Peer error:', err);
-                addLog('خطأ في الاتصال: ' + err.type, 'error');
-            });
-
-            // Child connects to us: accept data connection
-            state.peer.on('connection', (conn) => {
-                conn.on('open', () => {
-                    state.conn = conn;
-                    addLog('تم إنشاء قناة التحكم مع الابن.', 'success');
-                    conn.on('data', handleChildData);
-                });
-                conn.on('close', () => {
+            // Data channel for control commands
+            state.pc.ondatachannel = (e) => {
+                state.dc = e.channel;
+                state.dc.onopen = () => addLog('تم إنشاء قناة التحكم مع الابن.', 'success');
+                state.dc.onmessage = (ev) => handleChildData(JSON.parse(ev.data));
+                state.dc.onclose = () => {
                     addLog('قناة التحكم أُغلقت.', 'error');
-                    state.conn = null;
-                });
-            });
+                    state.dc = null;
+                };
+            };
 
-            // Child calls us with media stream
-            state.peer.on('call', (call) => {
-                addLog('جارٍ استقبال بث الشاشة من الابن...', 'info');
-                call.answer(); // accept, no local stream needed
-                state.call = call;
-                call.on('stream', (stream) => {
-                    state.stream = stream;
+            // Remote stream (child's screen)
+            state.pc.ontrack = (e) => {
+                const stream = e.streams[0];
+                if (stream) {
                     $('remoteVideo').srcObject = stream;
                     $('streamPlaceholder').style.display = 'none';
                     addLog('✅ بدء بث شاشة الابن مباشر.', 'success');
-                });
-                call.on('close', () => {
-                    $('remoteVideo').srcObject = null;
-                    $('streamPlaceholder').style.display = 'flex';
-                    addLog('توقف بث الشاشة.', 'error');
-                });
-            });
+                }
+            };
+
+            return state.pc;
+        }
+
+        async function handleOffer(sdp) {
+            const pc = ensurePeerConnection();
+            state.gotOffer = true;
+            await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
+
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            state.socket.emit('signal', { type: 'answer', sdp: pc.localDescription.sdp });
+            addLog('تم قبول طلب البث من الابن.', 'success');
         }
 
         function handleChildData(data) {
@@ -637,8 +654,8 @@
         }
 
         function sendToChild(obj) {
-            if (state.conn && state.conn.open) {
-                state.conn.send(obj);
+            if (state.dc && state.dc.readyState === 'open') {
+                state.dc.send(JSON.stringify(obj));
                 return true;
             }
             return false;

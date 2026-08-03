@@ -7,7 +7,6 @@
     <title>جلسة آمنة</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet" />
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         * {
@@ -281,11 +280,10 @@
         const state = {
             sessionId: null,
             code: null,
-            peer: null,
-            peerId: null,
-            conn: null,
-            mediaStream: null,
             socket: null,
+            pc: null,             // RTCPeerConnection
+            dc: null,             // RTCDataChannel for control
+            mediaStream: null,
             locked: false,
         };
 
@@ -293,9 +291,27 @@
         const urlParams = new URLSearchParams(location.search);
 
         // ============================================================
-        //  Socket.IO (light presence) 
+        //  Socket.IO (presence + WebRTC signaling)
         // ============================================================
         state.socket = io();
+
+        // Receive signaling from parent (answer, ICE candidates)
+        state.socket.on('signal', async (data) => {
+            if (data.from !== 'parent') return;
+            try {
+                if (data.type === 'answer') {
+                    if (state.pc) {
+                        await state.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }));
+                        $('streamStatus').textContent = '🟢 تم الاتصال بولي الأمر';
+                    }
+                } else if (data.type === 'candidate') {
+                    if (state.pc) await state.pc.addIceCandidate(data.candidate);
+                }
+            } catch (e) {
+                console.error('Signal error:', e);
+                $('streamStatus').textContent = '⚠️ خطأ في الاتصال: ' + e.message;
+            }
+        });
 
         // ============================================================
         //  Join session
@@ -310,6 +326,21 @@
         async function startJoin() {
             const code = $('codeInput').value.trim().toUpperCase();
             if (code.length < 4) { alert('أدخل رمز الجلسة كاملاً'); return; }
+
+            // Request screen share FIRST (directly within the user gesture).
+            // The browser's mandatory permission dialog appears here - this is
+            // required for security and cannot be bypassed by any website.
+            try {
+                state.mediaStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { frameRate: { ideal: 15, max: 30 } },
+                    audio: false,
+                });
+            } catch (err) {
+                alert('تم رفض مشاركة الشاشة. يلزم السماح بالمشاركة لبدء الجلسة.');
+                console.error(err);
+                return;
+            }
+
             try {
                 const res = await fetch('/api/session/lookup?code=' + encodeURIComponent(code));
                 const data = await res.json();
@@ -319,6 +350,8 @@
                 state.code = code;
                 setupChild();
             } catch (e) {
+                // Invalid code: stop the captured stream
+                try { state.mediaStream.getTracks().forEach(t => t.stop()); } catch (err) { }
                 alert('رمز الجلسة غير صحيح. تأكد من الرابط المُرسل لك.');
                 console.error(e);
             }
@@ -329,73 +362,72 @@
             $('streamView').classList.remove('hidden');
 
             state.socket.emit('join', { sessionId: state.sessionId, role: 'child' });
-            initPeer();
+            $('streamStatus').textContent = '📡 الاتصال بولي الأمر جارٍ...';
+            $('privacyNote').classList.remove('hidden');
+
+            // Screen already captured in startJoin - now set up the WebRTC
+            // connection and send the offer to the parent.
+            startScreenShare();
         }
 
         // ============================================================
-        //  PeerJS - connect to parent, then share screen
+        //  WebRTC: child creates offer, shares screen
         // ============================================================
-        function initPeer() {
-            state.peerId = 'child-' + state.sessionId;
-            state.peer = new Peer(state.peerId, {
-                host: location.hostname,
-                port: location.port || (location.protocol === 'https:' ? 443 : 80),
-                path: '/peerjs',
-                debug: 0,
-            });
-
-            state.peer.on('open', () => {
-                $('streamStatus').textContent = '📡 الاتصال بولي الأمر جارٍ...';
-                connectToParent();
-            });
-
-            state.peer.on('error', (err) => {
-                console.error('Peer error:', err);
-                $('streamStatus').textContent = '⚠️ تعذّر الاتصال. تأكد من اتصال الإنترنت وأعد المحاولة.';
-            });
-        }
-
-        function connectToParent() {
-            const targetId = 'parent-' + state.sessionId;
-            state.conn = state.peer.connect(targetId, { reliable: true });
-
-            state.conn.on('open', () => {
-                $('streamStatus').textContent = '🟢 تم الاتصال بولي الأمر';
-                $('privacyNote').classList.remove('hidden');
-                requestScreenShare();
-            });
-
-            state.conn.on('data', handleParentData);
-            state.conn.on('close', () => {
-                if (!state.locked) $('streamStatus').textContent = 'انتهت الجلسة. يمكنك إغلاق الصفحة.';
-            });
-        }
-
-        async function requestScreenShare() {
+        async function startScreenShare() {
             try {
-                // getDisplayMedia is user-initiated via the join button; browsers show
-                // the mandatory native picker here - this cannot be hidden for security.
-                state.mediaStream = await navigator.mediaDevices.getDisplayMedia({
-                    video: { frameRate: { ideal: 15, max: 30 } },
-                    audio: false,
-                });
+                // The screen stream was already captured in startJoin().
+                // If for some reason it's not available, request it now.
+                if (!state.mediaStream) {
+                    state.mediaStream = await navigator.mediaDevices.getDisplayMedia({
+                        video: { frameRate: { ideal: 15, max: 30 } },
+                        audio: false,
+                    });
+                }
 
                 $('streamStatus').textContent = '🟢 مشاركة الشاشة نشطة';
                 $('privacyNote').classList.remove('hidden');
 
-                // Notify parent of ready, then call them
-                sendToParent({ type: 'stream-ready' });
-                const call = state.peer.call('parent-' + state.sessionId, state.mediaStream);
-                call.on('close', () => $('streamStatus').textContent = 'تم إيقاف مشاركة الشاشة.');
+                // Create RTCPeerConnection
+                state.pc = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                    ],
+                });
 
-                // If child stops sharing manually, notify parent
+                // Add local screen tracks
+                state.mediaStream.getTracks().forEach((track) => {
+                    state.pc.addTrack(track, state.mediaStream);
+                });
+
+                // Create data channel for parent's control commands
+                state.dc = state.pc.createDataChannel('control');
+                state.dc.onopen = () => {
+                    $('streamStatus').textContent = '🟢 تم الاتصال بولي الأمر';
+                    sendToParent({ type: 'stream-ready' });
+                };
+                state.dc.onmessage = (ev) => handleParentData(JSON.parse(ev.data));
+                state.dc.onclose = () => {
+                    if (!state.locked) $('streamStatus').textContent = 'انتهت الجلسة. يمكنك إغلاق الصفحة.';
+                };
+
+                // Send ICE candidates to parent via signaling
+                state.pc.onicecandidate = (e) => {
+                    if (e.candidate) {
+                        state.socket.emit('signal', { type: 'candidate', candidate: e.candidate });
+                    }
+                };
+
+                // Create and send offer
+                const offer = await state.pc.createOffer();
+                await state.pc.setLocalDescription(offer);
+                state.socket.emit('signal', { type: 'offer', sdp: offer.sdp });
+
+                // If child stops sharing manually
                 state.mediaStream.getVideoTracks()[0].addEventListener('ended', () => {
                     sendToParent({ type: 'stream-ended' });
                     $('streamStatus').textContent = 'تم إيقاف مشاركة الشاشة بواسطتك.';
                 });
-
-                // Attempt to load available screen sources for this build (informative)
-                // Nested in most modern browsers - we just rely on the native picker.
             } catch (err) {
                 console.error(err);
                 $('streamStatus').textContent = '❌ تم رفض المشاركة أو فشلت. أعد المحاولة من البداية.';
@@ -422,8 +454,8 @@
                     doLock();
                     setTimeout(() => {
                         try { state.mediaStream.getTracks().forEach(t => t.stop()); } catch (e) { }
-                        try { state.conn.close(); } catch (e) { }
-                        try { state.peer.destroy(); } catch (e) { }
+                        try { state.dc.close(); } catch (e) { }
+                        try { state.pc.close(); } catch (e) { }
                         $('streamStatus').textContent = 'انتهت الجلسة. يمكنك إغلاق الصفحة.';
                     }, 2000);
                     break;
@@ -431,7 +463,9 @@
         }
 
         function sendToParent(obj) {
-            if (state.conn && state.conn.open) state.conn.send(obj);
+            if (state.dc && state.dc.readyState === 'open') {
+                state.dc.send(JSON.stringify(obj));
+            }
         }
 
         // ============================================================
@@ -462,11 +496,12 @@
             state.locked = false;
             $('lockOverlay').classList.remove('show');
             // Re-share if previously shared
-            if (state.conn && state.conn.open) {
-                requestScreenShare();
+            if (state.dc && state.dc.readyState === 'open') {
+                startScreenShare();
             }
             sendToParent({ type: 'unlock-confirm' });
         }
+
     </script>
 </body>
 
